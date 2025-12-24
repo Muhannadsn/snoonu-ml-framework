@@ -50,3 +50,4 @@ service_account.json
 .env.local
 .env.production
 *.env
+data/amp_data_yesterday.parquet

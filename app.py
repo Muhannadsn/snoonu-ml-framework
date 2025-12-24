@@ -194,8 +194,10 @@ def main():
             ("Overview", "grid"),
             ("Session Analytics", "activity"),
             ("Funnel Analysis", "filter"),
+            ("Customer Journey", "map"),
             ("User Segments", "users"),
             ("Cohort Analysis", "layers"),
+            ("Survival Analysis", "heart"),
             ("Recommendations", "star"),
             ("Trending", "trending-up"),
             ("Merchant Intelligence", "briefcase"),
@@ -269,10 +271,14 @@ def main():
         show_session_analytics(df)
     elif analysis == "Funnel Analysis":
         show_funnel(df)
+    elif analysis == "Customer Journey":
+        show_customer_journey(df)
     elif analysis == "User Segments":
         show_segments(df)
     elif analysis == "Cohort Analysis":
         show_cohort_analysis(df)
+    elif analysis == "Survival Analysis":
+        show_survival_analysis(df)
     elif analysis == "Recommendations":
         show_recommendations(df)
     elif analysis == "Trending":
@@ -4336,6 +4342,485 @@ def show_product_affinity(df):
             st.plotly_chart(fig, use_container_width=True)
         else:
             st.info("No product pair data available")
+
+
+def show_customer_journey(df):
+    """Customer Journey Mapping dashboard."""
+    from analytics.customer_journey import CustomerJourneyMapper
+
+    render_page_header("Customer Journey Mapping", "Visualize user paths and find friction points")
+
+    with st.spinner("Analyzing customer journeys..."):
+        mapper = CustomerJourneyMapper(df)
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Journey Flow", "Top Paths", "Friction Points", "Converters vs Non-Converters"
+    ])
+
+    with tab1:
+        render_section_header("User Flow Visualization")
+
+        try:
+            flow_data = mapper.get_flow_data()
+
+            if flow_data and len(flow_data['nodes']) > 0:
+                # Create Sankey diagram
+                fig = go.Figure(data=[go.Sankey(
+                    node=dict(
+                        pad=15,
+                        thickness=20,
+                        line=dict(color="black", width=0.5),
+                        label=flow_data['nodes'],
+                        color=COLORS['primary']
+                    ),
+                    link=dict(
+                        source=flow_data['links']['source'],
+                        target=flow_data['links']['target'],
+                        value=flow_data['links']['value'],
+                        color='rgba(255, 107, 53, 0.3)'
+                    )
+                )])
+
+                fig.update_layout(
+                    title="User Flow Between Events",
+                    height=600,
+                    font_size=10
+                )
+                apply_plotly_theme(fig)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Not enough data to visualize flow")
+        except Exception as e:
+            st.error(f"Error creating flow visualization: {e}")
+
+        # Drop-off analysis
+        render_section_header("Funnel Drop-off Analysis")
+        drop_off = mapper.get_drop_off_analysis()
+
+        if len(drop_off) > 0:
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=drop_off['stage'],
+                y=drop_off['drop_off_rate'],
+                marker_color=drop_off['drop_off_rate'].apply(
+                    lambda x: COLORS['error'] if x > 0.5 else COLORS['warning'] if x > 0.3 else COLORS['success']
+                ),
+                text=drop_off['drop_off_rate'].apply(lambda x: f'{x:.1%}'),
+                textposition='outside'
+            ))
+            fig.update_layout(
+                title="Drop-off Rate by Stage",
+                xaxis_title="Stage",
+                yaxis_title="Drop-off Rate",
+                yaxis_tickformat='.0%',
+                height=400
+            )
+            apply_plotly_theme(fig)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Worst drop-off points
+            worst = drop_off.nlargest(3, 'drop_off_rate')
+            if len(worst) > 0:
+                st.warning(f"**Biggest friction points:** {', '.join(worst['stage'].tolist())}")
+
+    with tab2:
+        render_section_header("Most Common User Paths")
+
+        min_occurrences = st.slider("Minimum occurrences", 5, 100, 10)
+        top_journeys = mapper.get_top_journeys(n=20, min_occurrences=min_occurrences)
+
+        if len(top_journeys) > 0:
+            # Add conversion indicator
+            top_journeys['status'] = top_journeys['conversion_rate'].apply(
+                lambda x: '✅ High CVR' if x > 0.1 else '⚠️ Low CVR' if x < 0.02 else '➡️ Medium'
+            )
+
+            st.dataframe(
+                top_journeys[['journey', 'occurrences', 'conversions', 'conversion_rate', 'length', 'status']].style.format({
+                    'conversion_rate': '{:.1%}',
+                    'occurrences': '{:,}',
+                    'conversions': '{:,}'
+                }).background_gradient(subset=['conversion_rate'], cmap='RdYlGn'),
+                use_container_width=True,
+                hide_index=True,
+                height=500
+            )
+
+            # Summary stats
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                avg_length = top_journeys['length'].mean()
+                st.metric("Avg Journey Length", f"{avg_length:.1f} events")
+            with col2:
+                avg_cvr = top_journeys['conversion_rate'].mean()
+                st.metric("Avg Conversion Rate", f"{avg_cvr:.1%}")
+            with col3:
+                total_sessions = top_journeys['occurrences'].sum()
+                st.metric("Sessions Analyzed", f"{total_sessions:,}")
+        else:
+            st.info("Not enough journey data")
+
+    with tab3:
+        render_section_header("Friction Point Analysis")
+
+        friction = mapper.get_friction_points()
+
+        if len(friction) > 0:
+            # Show friction scores
+            fig = px.bar(
+                friction.head(10),
+                x='event_type',
+                y='overall_friction',
+                color='overall_friction',
+                color_continuous_scale=['green', 'yellow', 'red'],
+                title="Friction Score by Event (Higher = More Friction)"
+            )
+            fig.update_layout(height=400)
+            apply_plotly_theme(fig)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Time analysis
+            render_section_header("Time Spent Before Each Event")
+            st.caption("Events that take longer may indicate user confusion or friction")
+
+            st.dataframe(
+                friction[['event_type', 'avg_time', 'median_time', 'occurrences', 'overall_friction']].style.format({
+                    'avg_time': '{:.1f}s',
+                    'median_time': '{:.1f}s',
+                    'occurrences': '{:,}',
+                    'overall_friction': '{:.2f}'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        # Loop analysis - where users go back
+        render_section_header("Loop Analysis (Where Users Get Stuck)")
+        loops = mapper.get_loop_analysis()
+
+        if len(loops) > 0:
+            st.caption("Events that users repeat often - may indicate confusion")
+            high_loops = loops[loops['loop_rate'] > 0.1]
+            if len(high_loops) > 0:
+                st.dataframe(
+                    high_loops.style.format({
+                        'loop_rate': '{:.1%}',
+                        'avg_repeats': '{:.1f}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.success("No significant looping behavior detected")
+
+    with tab4:
+        render_section_header("Converters vs Non-Converters")
+
+        comparison = mapper.get_path_comparison()
+
+        if comparison:
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("### Converters")
+                st.metric("Avg Journey Length", f"{comparison['avg_journey_length']['converters']:.1f} events")
+                st.metric("Total Sessions", f"{comparison['total_sessions']['converters']:,}")
+
+                st.markdown("**Top Entry Points:**")
+                for event, count in comparison['first_events']['converters'].items():
+                    st.write(f"• {event}: {count:,}")
+
+            with col2:
+                st.markdown("### Non-Converters")
+                st.metric("Avg Journey Length", f"{comparison['avg_journey_length']['non_converters']:.1f} events")
+                st.metric("Total Sessions", f"{comparison['total_sessions']['non_converters']:,}")
+
+                st.markdown("**Top Entry Points:**")
+                for event, count in comparison['first_events']['non_converters'].items():
+                    st.write(f"• {event}: {count:,}")
+
+            # Event lift analysis
+            render_section_header("Event Lift Analysis")
+            st.caption("Events with lift > 1 are more common in converter journeys")
+
+            lift_df = pd.DataFrame([
+                {'event': k, 'lift': v} for k, v in comparison['event_lift'].items()
+                if v != float('inf')
+            ]).sort_values('lift', ascending=False)
+
+            if len(lift_df) > 0:
+                fig = px.bar(
+                    lift_df.head(15),
+                    x='event',
+                    y='lift',
+                    color='lift',
+                    color_continuous_scale=['red', 'yellow', 'green'],
+                    title="Event Lift (Converters vs Non-Converters)"
+                )
+                fig.add_hline(y=1, line_dash="dash", line_color="white", annotation_text="Baseline")
+                fig.update_layout(height=400)
+                apply_plotly_theme(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
+
+def show_survival_analysis(df):
+    """Survival Analysis dashboard."""
+    from analytics.survival_analysis import SurvivalAnalyzer
+
+    render_page_header("Survival Analysis", "Time-to-churn and customer lifecycle analysis")
+
+    with st.spinner("Running survival analysis..."):
+        analyzer = SurvivalAnalyzer(df)
+
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "Survival Curves", "Retention Over Time", "Hazard Analysis", "Risk Factors"
+    ])
+
+    with tab1:
+        render_section_header("Kaplan-Meier Survival Curves")
+
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            analysis_type = st.selectbox(
+                "Analysis Type",
+                ["Time to Churn", "Time to Second Order"]
+            )
+            if analysis_type == "Time to Churn":
+                churn_days = st.slider("Churn definition (days inactive)", 14, 60, 30)
+
+        with col2:
+            if analysis_type == "Time to Churn":
+                km_curve = analyzer.kaplan_meier_curve('churn', churn_days)
+                title = f"Survival Curve (Churn = {churn_days}+ days inactive)"
+            else:
+                km_curve = analyzer.kaplan_meier_curve('second_order')
+                title = "Time to Second Order (Survival = Still Waiting)"
+
+            if len(km_curve) > 0:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=km_curve['time'],
+                    y=km_curve['survival_probability'],
+                    mode='lines',
+                    name='Survival Probability',
+                    line=dict(color=COLORS['primary'], width=3),
+                    fill='tozeroy',
+                    fillcolor='rgba(255, 107, 53, 0.2)'
+                ))
+
+                fig.update_layout(
+                    title=title,
+                    xaxis_title="Days",
+                    yaxis_title="Survival Probability",
+                    yaxis_tickformat='.0%',
+                    height=400,
+                    yaxis_range=[0, 1]
+                )
+                apply_plotly_theme(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Key metrics
+                if analysis_type == "Time to Churn":
+                    metrics = analyzer.get_median_survival_time('churn', churn_days)
+                else:
+                    metrics = analyzer.get_median_survival_time('second_order')
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Median Survival", f"{metrics['median']} days" if metrics['median'] else "Not reached")
+                with col2:
+                    st.metric("7-Day Survival", f"{metrics['survival_at_7_days']:.1%}" if metrics['survival_at_7_days'] else "N/A")
+                with col3:
+                    st.metric("30-Day Survival", f"{metrics['survival_at_30_days']:.1%}" if metrics['survival_at_30_days'] else "N/A")
+                with col4:
+                    st.metric("90-Day Survival", f"{metrics['survival_at_90_days']:.1%}" if metrics['survival_at_90_days'] else "N/A")
+            else:
+                st.info("Not enough data for survival analysis")
+
+    with tab2:
+        render_section_header("Retention Curve")
+
+        retention = analyzer.get_retention_curve(by='day')
+
+        if len(retention) > 0:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=retention['days_since_first_order'],
+                y=retention['retention_rate'],
+                mode='lines+markers',
+                name='Retention Rate',
+                line=dict(color=COLORS['info'], width=2),
+                marker=dict(size=4)
+            ))
+
+            fig.update_layout(
+                title="Customer Retention Over Time",
+                xaxis_title="Days Since First Order",
+                yaxis_title="% Still Active",
+                yaxis_tickformat='.0%',
+                height=400,
+                yaxis_range=[0, 1]
+            )
+            apply_plotly_theme(fig)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Key drop-off points
+            if len(retention) > 7:
+                day_7_retention = retention[retention['days_since_first_order'] == 7]['retention_rate'].iloc[0] if 7 in retention['days_since_first_order'].values else None
+                day_30_retention = retention[retention['days_since_first_order'] >= 30]['retention_rate'].iloc[0] if any(retention['days_since_first_order'] >= 30) else None
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    if day_7_retention:
+                        st.metric("Day 7 Retention", f"{day_7_retention:.1%}")
+                with col2:
+                    if day_30_retention:
+                        st.metric("Day 30 Retention", f"{day_30_retention:.1%}")
+
+        # Cohort survival
+        render_section_header("Survival by Cohort")
+        cohort_survival = analyzer.get_cohort_survival('week')
+
+        if len(cohort_survival) > 0:
+            # Pivot for heatmap
+            pivot = cohort_survival.pivot(index='cohort_label', columns='week', values='survival_rate')
+
+            fig = px.imshow(
+                pivot,
+                labels=dict(x="Week Since First Order", y="Cohort", color="Survival Rate"),
+                color_continuous_scale=['red', 'yellow', 'green'],
+                title="Cohort Survival Rates"
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with tab3:
+        render_section_header("Hazard Rate Analysis")
+        st.caption("When are customers most likely to churn?")
+
+        hazard = analyzer.get_hazard_by_period('week')
+
+        if len(hazard) > 0:
+            fig = go.Figure()
+            fig.add_trace(go.Bar(
+                x=hazard['period_label'],
+                y=hazard['hazard_rate'],
+                marker_color=hazard['hazard_rate'].apply(
+                    lambda x: COLORS['error'] if x > 0.3 else COLORS['warning'] if x > 0.15 else COLORS['success']
+                ),
+                text=hazard['hazard_rate'].apply(lambda x: f'{x:.1%}'),
+                textposition='outside'
+            ))
+
+            fig.update_layout(
+                title="Churn Hazard Rate by Week",
+                xaxis_title="Week After First Order",
+                yaxis_title="Hazard Rate (Probability of Churning)",
+                yaxis_tickformat='.0%',
+                height=400
+            )
+            apply_plotly_theme(fig)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Find critical week
+            if len(hazard) > 0:
+                critical_week = hazard.loc[hazard['hazard_rate'].idxmax()]
+                st.warning(f"**Critical Period:** {critical_week['period_label']} has highest churn risk ({critical_week['hazard_rate']:.1%})")
+
+            # Users at each stage
+            render_section_header("User Funnel Over Time")
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(
+                x=hazard['period_label'],
+                y=hazard['users_remaining'],
+                mode='lines+markers',
+                name='Users Remaining',
+                line=dict(color=COLORS['primary'], width=3),
+                fill='tozeroy',
+                fillcolor='rgba(255, 107, 53, 0.2)'
+            ))
+
+            fig2.update_layout(
+                title="Active Users Over Time",
+                xaxis_title="Week",
+                yaxis_title="Users Still Active",
+                height=350
+            )
+            apply_plotly_theme(fig2)
+            st.plotly_chart(fig2, use_container_width=True)
+
+    with tab4:
+        render_section_header("Churn Risk Factors")
+
+        risk_factors = analyzer.get_risk_factors(churn_days=30)
+
+        if len(risk_factors) > 0:
+            for segment in risk_factors['segment'].unique():
+                st.subheader(f"By {segment.replace('_', ' ').title()}")
+
+                segment_data = risk_factors[risk_factors['segment'] == segment]
+
+                fig = px.bar(
+                    segment_data,
+                    x='segment_value',
+                    y='churn_rate',
+                    color='churn_rate',
+                    color_continuous_scale=['green', 'yellow', 'red'],
+                    text=segment_data['churn_rate'].apply(lambda x: f'{x:.1%}')
+                )
+                fig.update_traces(textposition='outside')
+                fig.update_layout(
+                    xaxis_title=segment.replace('_', ' ').title(),
+                    yaxis_title="Churn Rate",
+                    yaxis_tickformat='.0%',
+                    height=350,
+                    showlegend=False
+                )
+                apply_plotly_theme(fig)
+                st.plotly_chart(fig, use_container_width=True)
+
+            # Key insight
+            highest_risk = risk_factors.loc[risk_factors['churn_rate'].idxmax()]
+            lowest_risk = risk_factors.loc[risk_factors['churn_rate'].idxmin()]
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.error(f"**Highest Risk:** {highest_risk['segment_value']} ({highest_risk['churn_rate']:.1%} churn)")
+            with col2:
+                st.success(f"**Lowest Risk:** {lowest_risk['segment_value']} ({lowest_risk['churn_rate']:.1%} churn)")
+        else:
+            st.info("Not enough data for risk factor analysis")
+
+        # Time to second order analysis
+        render_section_header("Time to Second Order")
+        second_order = analyzer.get_time_to_second_order()
+
+        if len(second_order) > 0:
+            converted = second_order[second_order['has_second_order']]
+
+            if len(converted) > 0:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Repeat Purchase Rate", f"{len(converted) / len(second_order):.1%}")
+                with col2:
+                    st.metric("Avg Days to 2nd Order", f"{converted['time_to_second_order_days'].mean():.0f}")
+                with col3:
+                    st.metric("Median Days to 2nd Order", f"{converted['time_to_second_order_days'].median():.0f}")
+
+                # Distribution
+                fig = px.histogram(
+                    converted,
+                    x='time_to_second_order_days',
+                    nbins=30,
+                    title="Distribution: Days Between 1st and 2nd Order"
+                )
+                fig.update_layout(
+                    xaxis_title="Days",
+                    yaxis_title="Users",
+                    height=350
+                )
+                apply_plotly_theme(fig)
+                st.plotly_chart(fig, use_container_width=True)
 
 
 if __name__ == '__main__':

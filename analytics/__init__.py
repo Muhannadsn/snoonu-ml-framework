@@ -3,7 +3,7 @@
 Provides comprehensive analytics including session analysis, funnel analytics,
 merchant intelligence, promo analysis, search analytics, delivery analytics,
 customer scoring, anomaly detection, attribution modeling, reactivation targeting,
-and product affinity analysis.
+product affinity analysis, customer journey mapping, and survival analysis.
 """
 
 from .session_analytics import SessionAnalyzer, FunnelAnalyzer, PathAnalyzer
@@ -16,6 +16,8 @@ from .anomaly_detection import AnomalyDetector
 from .attribution import AttributionModeler, ChannelAttributor
 from .reactivation import ReactivationTargeter
 from .product_affinity import ProductAffinityAnalyzer, MerchantCrossSeller
+from .customer_journey import CustomerJourneyMapper
+from .survival_analysis import SurvivalAnalyzer
 
 __all__ = [
     'SessionAnalyzer',
@@ -31,5 +33,7 @@ __all__ = [
     'ChannelAttributor',
     'ReactivationTargeter',
     'ProductAffinityAnalyzer',
-    'MerchantCrossSeller'
+    'MerchantCrossSeller',
+    'CustomerJourneyMapper',
+    'SurvivalAnalyzer'
 ]
