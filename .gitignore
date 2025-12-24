@@ -1,7 +1,6 @@
-# Data files
-data/
-*.parquet
-*.csv
+# Data files (except sample)
+data/*.csv
+!data/sample_data.parquet
 
 # Outputs
 outputs/

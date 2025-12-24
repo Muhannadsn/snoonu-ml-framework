@@ -124,15 +124,25 @@ def main():
         # Data source selection
         st.markdown("##### DATA SOURCE")
 
+        # Check if running on cloud or locally
+        is_cloud = not Path("/Users/muhannadsaad").exists()
+
+        if is_cloud:
+            data_options = ["Sample Data (100k rows)", "Upload File"]
+        else:
+            data_options = ["Default (Dec 15)", "Dec 9 Data", "Upload File", "Enter Path"]
+
         data_option = st.radio(
             "Choose data source:",
-            ["Default (Dec 15)", "Dec 9 Data", "Upload File", "Enter Path"],
+            data_options,
             label_visibility="collapsed"
         )
 
         data_path = None
 
-        if data_option == "Default (Dec 15)":
+        if data_option == "Sample Data (100k rows)":
+            data_path = Path(__file__).parent / "data" / "sample_data.parquet"
+        elif data_option == "Default (Dec 15)":
             data_path = "/Users/muhannadsaad/Desktop/investigation/dec_15/dec_15_25.parquet"
         elif data_option == "Dec 9 Data":
             data_path = "/Users/muhannadsaad/Desktop/snoonu-ml-framework/data/amp_data_yesterday.parquet"
