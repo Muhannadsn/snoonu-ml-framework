@@ -78,6 +78,87 @@ class DataLoader:
 
         return df
 
+    def load_multiple(self, file_paths: List[str], validate: bool = True) -> pd.DataFrame:
+        """
+        Load and combine multiple data files.
+
+        Args:
+            file_paths: List of paths to data files
+            validate: Whether to validate schema
+
+        Returns:
+            Combined DataFrame with data from all files
+        """
+        if not file_paths:
+            raise ValueError("No files provided")
+
+        dfs = []
+        for path in file_paths:
+            try:
+                df = self.load(path, validate=validate)
+                # Add source file info
+                df['_source_file'] = Path(path).name
+                dfs.append(df)
+                logger.info(f"Loaded {len(df):,} rows from {path}")
+            except Exception as e:
+                logger.warning(f"Failed to load {path}: {e}")
+
+        if not dfs:
+            raise ValueError("No files could be loaded")
+
+        # Combine all DataFrames
+        combined = pd.concat(dfs, ignore_index=True)
+
+        # Sort by user and time
+        if 'amplitude_id' in combined.columns and 'event_time' in combined.columns:
+            combined = combined.sort_values(['amplitude_id', 'event_time'])
+
+        logger.info(f"Combined {len(file_paths)} files: {len(combined):,} total rows")
+
+        return combined
+
+    def load_date_range(self, folder_path: str, start_date: str = None,
+                        end_date: str = None, pattern: str = "*.parquet") -> pd.DataFrame:
+        """
+        Load all files from a folder, optionally filtering by date in filename.
+
+        Args:
+            folder_path: Path to folder containing data files
+            start_date: Start date string (e.g., "2024-12-09")
+            end_date: End date string (e.g., "2024-12-15")
+            pattern: Glob pattern for files (default: *.parquet)
+
+        Returns:
+            Combined DataFrame
+        """
+        folder = Path(folder_path)
+        if not folder.exists():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+
+        # Find all matching files
+        files = sorted(folder.glob(pattern))
+
+        if not files:
+            raise FileNotFoundError(f"No files matching {pattern} in {folder_path}")
+
+        logger.info(f"Found {len(files)} files in {folder_path}")
+
+        # Load all files
+        return self.load_multiple([str(f) for f in files])
+
+    def load_folder(self, folder_path: str, pattern: str = "*.parquet") -> pd.DataFrame:
+        """
+        Load all parquet/csv files from a folder.
+
+        Args:
+            folder_path: Path to folder
+            pattern: Glob pattern (default: *.parquet)
+
+        Returns:
+            Combined DataFrame from all files
+        """
+        return self.load_date_range(folder_path, pattern=pattern)
+
     def _validate_schema(self, df: pd.DataFrame) -> None:
         """Validate that required columns exist."""
         required = self.schema.get('required_columns', [])

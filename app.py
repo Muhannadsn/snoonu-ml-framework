@@ -59,6 +59,20 @@ def load_data(file_path):
 
 
 @st.cache_data
+def load_multiple_files(file_paths):
+    """Load and combine multiple data files."""
+    loader = DataLoader()
+    return loader.load_multiple(file_paths)
+
+
+@st.cache_data
+def load_folder(folder_path):
+    """Load all parquet files from a folder."""
+    loader = DataLoader()
+    return loader.load_folder(folder_path)
+
+
+@st.cache_data
 def load_predictions(output_dir):
     """Load prediction outputs if available."""
     predictions = {}
@@ -128,9 +142,9 @@ def main():
         is_cloud = not Path("/Users/muhannadsaad").exists()
 
         if is_cloud:
-            data_options = ["Sample Data (100k rows)", "Upload File"]
+            data_options = ["Sample Data (100k rows)", "Upload File", "Upload Multiple Files"]
         else:
-            data_options = ["Default (Dec 15)", "Dec 9 Data", "Upload File", "Enter Path"]
+            data_options = ["Default (Dec 15)", "Load Folder (Multi-day)", "Upload File", "Upload Multiple Files", "Enter Path"]
 
         data_option = st.radio(
             "Choose data source:",
@@ -139,13 +153,35 @@ def main():
         )
 
         data_path = None
+        df = None  # For multi-file loading
 
         if data_option == "Sample Data (100k rows)":
             data_path = Path(__file__).parent / "data" / "sample_data.parquet"
         elif data_option == "Default (Dec 15)":
             data_path = "/Users/muhannadsaad/Desktop/investigation/dec_15/dec_15_25.parquet"
-        elif data_option == "Dec 9 Data":
-            data_path = "/Users/muhannadsaad/Desktop/snoonu-ml-framework/data/amp_data_yesterday.parquet"
+        elif data_option == "Load Folder (Multi-day)":
+            folder_path = st.text_input(
+                "Folder path:",
+                value="/Users/muhannadsaad/Desktop/investigation",
+                help="Path to folder containing multiple parquet files"
+            )
+            if folder_path and Path(folder_path).exists():
+                # List available parquet files
+                parquet_files = list(Path(folder_path).rglob("*.parquet"))
+                if parquet_files:
+                    st.caption(f"Found {len(parquet_files)} parquet files")
+                    # Let user select which files to include
+                    selected_files = st.multiselect(
+                        "Select files to load:",
+                        [str(f) for f in sorted(parquet_files)],
+                        default=[str(f) for f in sorted(parquet_files)[:3]],  # Default to first 3
+                        help="Select multiple files to combine"
+                    )
+                    if selected_files:
+                        data_path = "MULTI_FILE"
+                        st.session_state['selected_files'] = selected_files
+                else:
+                    st.warning("No parquet files found in folder")
         elif data_option == "Upload File":
             uploaded_file = st.file_uploader("Upload parquet/csv", type=['parquet', 'csv'])
             if uploaded_file:
@@ -155,10 +191,32 @@ def main():
                 with open(temp_path, 'wb') as f:
                     f.write(uploaded_file.getbuffer())
                 data_path = str(temp_path)
-        else:
+        elif data_option == "Upload Multiple Files":
+            uploaded_files = st.file_uploader(
+                "Upload multiple parquet/csv files",
+                type=['parquet', 'csv'],
+                accept_multiple_files=True
+            )
+            if uploaded_files:
+                file_paths = []
+                for uploaded_file in uploaded_files:
+                    temp_path = Path("data") / uploaded_file.name
+                    temp_path.parent.mkdir(exist_ok=True)
+                    with open(temp_path, 'wb') as f:
+                        f.write(uploaded_file.getbuffer())
+                    file_paths.append(str(temp_path))
+                if file_paths:
+                    data_path = "MULTI_FILE"
+                    st.session_state['selected_files'] = file_paths
+                    st.success(f"Loaded {len(file_paths)} files")
+        else:  # Enter Path
             data_path = st.text_input("Enter file path:", label_visibility="collapsed", placeholder="Enter file path...")
 
-    if not data_path or not Path(data_path).exists():
+    # Handle data loading
+    if data_path == "MULTI_FILE" and 'selected_files' in st.session_state:
+        # Multi-file mode
+        pass  # Will load below
+    elif not data_path or (data_path != "MULTI_FILE" and not Path(data_path).exists()):
         # Welcome screen
         render_page_header("Snoonu ML", "Analytics & Machine Learning Platform")
         st.info("Select a data source from the sidebar to get started.")
@@ -167,22 +225,49 @@ def main():
     # Show loading screen while data loads
     loading_placeholder = st.empty()
 
+    # Determine cache key based on data source
+    if data_path == "MULTI_FILE":
+        cache_key = tuple(sorted(st.session_state.get('selected_files', [])))
+    else:
+        cache_key = str(data_path)
+
     # Check if data is already cached
-    if 'data_loaded' not in st.session_state or st.session_state.get('current_data_path') != data_path:
+    if 'data_loaded' not in st.session_state or st.session_state.get('current_data_path') != cache_key:
         with loading_placeholder.container():
             render_loading_screen()
 
-        df = load_data(data_path)
+        # Load data based on mode
+        if data_path == "MULTI_FILE":
+            selected_files = st.session_state.get('selected_files', [])
+            df = load_multiple_files(tuple(selected_files))  # tuple for caching
+        else:
+            df = load_data(data_path)
+
         predictions = load_predictions('outputs')
 
         st.session_state.data_loaded = True
-        st.session_state.current_data_path = data_path
+        st.session_state.current_data_path = cache_key
 
         # Clear loading screen
         loading_placeholder.empty()
     else:
-        df = load_data(data_path)
+        # Load from cache
+        if data_path == "MULTI_FILE":
+            selected_files = st.session_state.get('selected_files', [])
+            df = load_multiple_files(tuple(selected_files))
+        else:
+            df = load_data(data_path)
         predictions = load_predictions('outputs')
+
+    # Show data info for multi-file
+    if data_path == "MULTI_FILE":
+        with st.sidebar:
+            date_range = ""
+            if 'event_time' in df.columns:
+                min_date = df['event_time'].min().strftime('%Y-%m-%d')
+                max_date = df['event_time'].max().strftime('%Y-%m-%d')
+                date_range = f" ({min_date} to {max_date})"
+            st.caption(f"Combined: {len(df):,} events{date_range}")
 
     # Sidebar - Analysis selection with icons
     with st.sidebar:
