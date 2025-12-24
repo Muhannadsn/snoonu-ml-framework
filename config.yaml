@@ -1,0 +1,224 @@
+# Snoonu ML Framework Configuration
+# This file defines the schema, event types, and model parameters
+# Update this when data schema changes - no code changes needed
+
+# =============================================================================
+# DATA SCHEMA
+# =============================================================================
+schema:
+  # Required columns (will error if missing)
+  required_columns:
+    - amplitude_id
+    - event_type
+    - event_time
+    - platform
+
+  # Event properties can be in JSON column or individual columns
+  event_properties_column: event_properties  # Optional - if missing, use individual columns
+
+  # Optional columns (will warn if missing)
+  optional_columns:
+    - device_family
+    - os_name
+    - os_version
+    - country
+    - device_id
+
+  # Column types for validation
+  column_types:
+    amplitude_id: int64
+    event_type: string
+    event_time: datetime
+    event_properties: string
+    platform: string
+
+# =============================================================================
+# EVENT DEFINITIONS
+# =============================================================================
+events:
+  # Funnel events in order
+  funnel:
+    - homepage_viewed
+    - category_page_viewed
+    - merchant_page_viewed
+    - product_page_viewed
+    - product_added
+    - cart_page_viewed
+    - checkout_button_pressed
+    - payment_initiated
+    - checkout_completed
+
+  # Order events
+  order_events:
+    - checkout_completed
+    - order_delivered
+
+  # Traffic/entry events
+  traffic_events:
+    - homepage_viewed
+
+  # Engagement events
+  engagement_events:
+    - search_made
+    - product_page_viewed
+    - merchant_page_viewed
+
+  # Auth events
+  auth_events:
+    - user_signed_up
+    - phone_entered
+    - otp_entered
+
+# =============================================================================
+# EVENT PROPERTIES
+# =============================================================================
+event_properties:
+  checkout_completed:
+    - order_id
+    - order_total
+    - order_type
+    - merchant_id
+    - merchant_name
+    - products_quantity
+    - payment_method
+    - delivery_fee
+    - promo_code
+    - group_order
+    - multi_cart
+    - distance
+    - estimated_delivery_time
+
+  homepage_viewed:
+    - first_session
+    - customer_status
+    - hour
+    - zone_name
+
+  order_delivered:
+    - order_id
+    - total_delivered_orders
+    - fulfillment_time
+    - order_status
+
+  product_page_viewed:
+    - product_id
+    - product_name
+    - product_price
+    - merchant_id
+
+# =============================================================================
+# FEATURE ENGINEERING
+# =============================================================================
+features:
+  # User-level aggregations
+  user_features:
+    # Recency features
+    - days_since_last_order
+    - days_since_first_order
+    - days_since_last_visit
+
+    # Frequency features
+    - total_orders
+    - total_sessions
+    - orders_per_week
+    - sessions_per_week
+
+    # Monetary features
+    - total_revenue
+    - avg_order_value
+    - max_order_value
+
+    # Behavioral features
+    - avg_products_per_order
+    - unique_merchants
+    - favorite_merchant_orders
+    - pct_promo_orders
+    - pct_group_orders
+
+    # Platform features
+    - primary_platform
+    - pct_ios
+
+    # Funnel features
+    - avg_funnel_depth
+    - conversion_rate
+
+  # Session-level features (for conversion model)
+  session_features:
+    - session_duration
+    - pages_viewed
+    - products_viewed
+    - products_added
+    - searches_made
+    - funnel_stage_reached
+
+# =============================================================================
+# MODEL PARAMETERS
+# =============================================================================
+models:
+  churn:
+    # Churn definition
+    churn_window_days: 30  # No order in X days = churned
+    lookback_days: 90      # Feature window
+
+    # Model settings
+    algorithm: random_forest
+    test_size: 0.2
+    random_state: 42
+
+    # Hyperparameters
+    n_estimators: 100
+    max_depth: 10
+    min_samples_split: 10
+
+  segmentation:
+    # RFM settings
+    rfm_quantiles: 5
+
+    # Clustering settings
+    algorithm: kmeans
+    n_clusters: 5
+    random_state: 42
+
+  conversion:
+    # Session definition
+    session_timeout_minutes: 30
+
+    # Model settings
+    algorithm: logistic_regression
+    test_size: 0.2
+    random_state: 42
+
+  ltv:
+    # LTV prediction window
+    prediction_window_days: 365
+    lookback_days: 90
+
+    # Model settings
+    algorithm: gradient_boosting
+    test_size: 0.2
+    random_state: 42
+
+# =============================================================================
+# OUTPUT SETTINGS
+# =============================================================================
+output:
+  # Output directory
+  dir: outputs
+
+  # File formats
+  predictions_format: csv
+  reports_format: html
+
+  # What to save
+  save_predictions: true
+  save_feature_importance: true
+  save_model: true
+  save_report: true
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+logging:
+  level: INFO
+  file: outputs/run.log

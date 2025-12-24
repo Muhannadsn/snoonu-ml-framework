@@ -1,0 +1,19 @@
+[theme]
+# Snoonu Brand Colors - Dark Professional Theme
+primaryColor = "#FF6B35"          # Snoonu Orange
+backgroundColor = "#0E1117"        # Dark background
+secondaryBackgroundColor = "#1A1F2E"  # Slightly lighter dark
+textColor = "#FAFAFA"              # Light text
+font = "sans serif"
+
+[server]
+headless = true
+enableStaticServing = false
+enableXsrfProtection = true
+maxUploadSize = 50
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = false
