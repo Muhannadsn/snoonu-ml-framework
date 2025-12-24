@@ -259,15 +259,55 @@ def main():
             df = load_data(data_path)
         predictions = load_predictions('outputs')
 
-    # Show data info for multi-file
-    if data_path == "MULTI_FILE":
+    # Show data info for multi-file with user tracking verification
+    if data_path == "MULTI_FILE" and '_source_file' in df.columns:
         with st.sidebar:
-            date_range = ""
+            st.markdown("---")
+            st.markdown("##### MULTI-DAY DATA")
+
+            # Date range
             if 'event_time' in df.columns:
-                min_date = df['event_time'].min().strftime('%Y-%m-%d')
-                max_date = df['event_time'].max().strftime('%Y-%m-%d')
-                date_range = f" ({min_date} to {max_date})"
-            st.caption(f"Combined: {len(df):,} events{date_range}")
+                min_date = df['event_time'].min().strftime('%b %d')
+                max_date = df['event_time'].max().strftime('%b %d, %Y')
+                st.caption(f"**Period:** {min_date} → {max_date}")
+
+            # Files loaded
+            num_files = df['_source_file'].nunique()
+            st.caption(f"**Files:** {num_files} combined")
+
+            # Total events and users
+            total_events = len(df)
+            total_users = df['amplitude_id'].nunique()
+            st.caption(f"**Events:** {total_events:,}")
+            st.caption(f"**Unique users:** {total_users:,}")
+
+            # Users appearing in multiple files (the key insight!)
+            user_file_counts = df.groupby('amplitude_id')['_source_file'].nunique()
+            users_multi_day = (user_file_counts > 1).sum()
+            pct_multi_day = users_multi_day / total_users * 100 if total_users > 0 else 0
+
+            st.markdown(f"**Tracked across days:** {users_multi_day:,} ({pct_multi_day:.1f}%)")
+
+            # Show a small breakdown
+            if users_multi_day > 0:
+                with st.expander("User tracking breakdown"):
+                    # How many users appear in 1, 2, 3+ files
+                    file_dist = user_file_counts.value_counts().sort_index()
+                    for num_files_appeared, count in file_dist.items():
+                        if num_files_appeared == 1:
+                            st.write(f"• {count:,} users in 1 day only")
+                        else:
+                            st.write(f"• {count:,} users in {num_files_appeared} days")
+
+                    # Example of a returning user
+                    returning_users = user_file_counts[user_file_counts > 1].head(1)
+                    if len(returning_users) > 0:
+                        example_user = returning_users.index[0]
+                        user_events = df[df['amplitude_id'] == example_user].sort_values('event_time')
+                        dates_active = user_events['event_time'].dt.date.unique()
+                        st.markdown("---")
+                        st.markdown(f"**Example returning user:**")
+                        st.code(f"User {str(example_user)[:8]}...\nActive on: {', '.join(str(d) for d in dates_active[:5])}")
 
     # Sidebar - Analysis selection with icons
     with st.sidebar:
